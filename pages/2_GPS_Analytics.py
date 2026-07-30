@@ -28,9 +28,9 @@ from utils.exports import to_csv_bytes, to_geojson_bytes, to_geopackage_bytes
 from utils.io import read_prepared_dataset, read_vector_upload
 from utils.mapping import build_analytics_map
 from utils.preprocessing import ensure_crs_4326, repair_geometries, reproject_to_match
-from utils.spatial import count_points_per_grid, join_points_to_grid
+from utils.spatial import classify_visitation_status, count_points_per_grid, join_points_to_grid
 
-st.set_page_config(page_title="Module 2 — GPS Analytics", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Module 2 — GTS Analytics", page_icon="📊", layout="wide")
 
 
 # --------------------------------------------------------------------------- #
@@ -62,33 +62,42 @@ def _load_grid(file_bytes: bytes, file_name: str) -> gpd.GeoDataFrame:
 
 
 def main() -> None:
-    st.title("📊 Module 2 — GPS Analytics")
-    st.caption("Spatial join, grid statistics, interactive mapping, and exports.")
+    st.title("📊 Module 2 — GTS Analytics")
+    st.caption("Spatial join, visitation status, grid statistics, interactive mapping, and exports.")
 
     # ----------------------------------------------------------------- #
-    # Step 1 — Upload prepared GPS dataset
+    # Step 1 — Upload or Preload Prepared GTS Dataset
     # ----------------------------------------------------------------- #
-    st.header("Step 1 — Upload Prepared GPS Dataset")
+    st.header("Step 1 — GTS Dataset (Preloaded or Custom)")
+    
+    preloaded_gdf = st.session_state.get("prepared_gdf")
+    points_gdf = None
+
+    if preloaded_gdf is not None and not preloaded_gdf.empty:
+        st.success(f"✅ **Preloaded GTS Dataset**: Automatically loaded **{len(preloaded_gdf):,}** GTS points from Module 1.")
+        points_gdf = preloaded_gdf
+        with st.expander("Preview preloaded GTS dataset"):
+            st.dataframe(points_gdf.drop(columns="geometry").head(20), use_container_width=True)
+
     gps_file = st.file_uploader(
-        "Upload the dataset exported from Module 1 (CSV, GeoPackage, or GeoJSON)",
+        "Upload a custom GTS dataset (CSV, GeoPackage, or GeoJSON) to override preloaded data",
         type=["csv", "gpkg", "geojson", "json"],
         key="gps_upload",
     )
 
-    points_gdf = None
     if gps_file is not None:
         try:
-            with st.spinner("Loading prepared GPS dataset..."):
+            with st.spinner("Loading uploaded GTS dataset..."):
                 points_gdf = _load_prepared(gps_file.getvalue(), gps_file.name)
-            st.success(f"Loaded {len(points_gdf):,} GPS points.")
-            with st.expander("Preview GPS points"):
+            st.success(f"Loaded {len(points_gdf):,} GTS points from upload.")
+            with st.expander("Preview uploaded GTS points"):
                 st.dataframe(points_gdf.drop(columns="geometry").head(20), use_container_width=True)
         except ValueError as exc:
             st.error(str(exc))
         except Exception as exc:  # noqa: BLE001
-            st.error(f"Unexpected error while reading the GPS dataset: {exc}")
-    else:
-        st.info("Upload the prepared GPS dataset to continue.")
+            st.error(f"Unexpected error while reading the GTS dataset: {exc}")
+    elif points_gdf is None:
+        st.info("Run Module 1 to prepare data or upload a custom GTS dataset above.")
 
     st.divider()
 
@@ -138,7 +147,6 @@ def main() -> None:
             grid_gdf = None
         except Exception as exc:  # noqa: BLE001
             st.error(f"Unexpected error while reading the grid: {exc}")
-            grid_gdf = None
     else:
         st.info("Upload a campaign grid to continue.")
 
@@ -147,7 +155,6 @@ def main() -> None:
     # ----------------------------------------------------------------- #
     # Optional boundary overlay
     # ----------------------------------------------------------------- #
-    st.header("Optional — Upload Boundary for Map Context")
     boundary_file = st.file_uploader(
         "Optional: overlay a state boundary on the map",
         type=["zip", "gpkg", "geojson", "json"],
@@ -164,7 +171,7 @@ def main() -> None:
     st.divider()
 
     # ----------------------------------------------------------------- #
-    # Steps 3-9 — Run analysis
+    # Steps 3-8 — Run analysis
     # ----------------------------------------------------------------- #
     if points_gdf is None or grid_gdf is None or grid_id_col is None:
         st.warning("Complete Steps 1 and 2 above to unlock the analysis.")
@@ -182,7 +189,7 @@ def main() -> None:
 
     if run_button:
         t0 = time.time()
-        with st.spinner("Performing spatial join..."):
+        with st.spinner("Performing spatial join & coverage classification..."):
             try:
                 joined = join_points_to_grid(points_gdf, grid_gdf, grid_id_col)
             except Exception as exc:  # noqa: BLE001
@@ -191,9 +198,10 @@ def main() -> None:
 
             grid_with_counts = count_points_per_grid(joined, grid_gdf, grid_id_col)
             grid_with_counts = compute_grid_areas(grid_with_counts)
+            grid_with_counts = classify_visitation_status(grid_with_counts)
 
         elapsed = time.time() - t0
-        st.success(f"Spatial join completed in {elapsed:.2f}s.")
+        st.success(f"Spatial join and visitation classification completed in {elapsed:.2f}s.")
 
         st.session_state["joined_points"] = joined
         st.session_state["grid_with_counts"] = grid_with_counts
@@ -203,6 +211,23 @@ def main() -> None:
         return
 
     grid_with_counts = st.session_state["grid_with_counts"]
+
+    # ---- Force re-classify Visitation_Status on every load ----
+    # This guarantees stale cached values ("Low Coverage", etc.)
+    # are always replaced with the correct binary classification.
+    import numpy as np
+    counts = grid_with_counts["Point_Count"].astype(int)
+    grid_with_counts["Visitation_Status"] = np.where(
+        counts > 0, "Visited", "Not Visited"
+    )
+
+    # Drop any legacy "Visited" column
+    v_cols = [c for c in grid_with_counts.columns if c.lower() == "visited"]
+    if v_cols:
+        grid_with_counts = grid_with_counts.drop(columns=v_cols)
+
+    st.session_state["grid_with_counts"] = grid_with_counts
+
     joined = st.session_state["joined_points"]
     grid_id_col = st.session_state["grid_id_col"]
 
@@ -216,17 +241,13 @@ def main() -> None:
     row1[0].metric("Total Grids", f"{stats.total_grids:,}")
     row1[1].metric("Visited Grids", f"{stats.visited_grids:,}")
     row1[2].metric("Unvisited Grids", f"{stats.unvisited_grids:,}")
-    row1[3].metric("Total GPS Points", f"{stats.total_gps_points:,}")
+    row1[3].metric("Total GTS Points", f"{stats.total_gts_points:,}")
 
     row2 = st.columns(4)
     row2[0].metric("Avg Points / Visited Grid", f"{stats.avg_points_per_visited_grid:,.2f}")
-    row2[1].metric("Max Points in a Grid", f"{stats.max_points:,}")
-    row2[2].metric("Min Points", f"{stats.min_points:,}")
+    row2[1].metric("Max Points", f"{stats.max_points:,}")
+    row2[2].metric("Median Points", f"{stats.median_points:,.2f}")
     row2[3].metric("% Grids Visited", f"{stats.pct_visited:,.1f}%")
-
-    row3 = st.columns(2)
-    row3[0].metric("Median Points", f"{stats.median_points:,.2f}")
-    row3[1].metric("Std Dev of Points", f"{stats.std_points:,.2f}")
 
     st.divider()
 
@@ -246,90 +267,53 @@ def main() -> None:
     st.divider()
 
     # ------------------------------------------------------------- #
-    # Step 7 — Grid summary table
+    # Step 7 — Export & Data Preview
     # ------------------------------------------------------------- #
-    st.header("Step 7 — Grid Summary Table")
-    summary_df = grid_with_counts.drop(columns="geometry").copy()
-    summary_df["Visited"] = summary_df["Point_Count"].apply(lambda x: "Yes" if x > 0 else "No")
-    display_cols = [grid_id_col, "Point_Count", "Area", "Visited"]
-    display_cols = [c for c in display_cols if c in summary_df.columns]
-    summary_df = summary_df[display_cols].sort_values("Point_Count", ascending=False)
+    st.header("Step 7 — Export & Data Preview")
+    export_df = grid_with_counts.copy()
+    drop_cols = [c for c in export_df.columns if c == "geometry" or c.lower() == "visited"]
+    if drop_cols:
+        export_df = export_df.drop(columns=drop_cols)
 
-    search_term = st.text_input("🔍 Search by Grid ID")
+
+    search_term = st.text_input("🔍 Search Export Summary")
     if search_term:
-        summary_df_display = summary_df[
-            summary_df[grid_id_col].astype(str).str.contains(search_term, case=False, na=False)
-        ]
+        match_mask = export_df.astype(str).apply(
+            lambda row: row.str.contains(search_term, case=False, na=False)
+        ).any(axis=1)
+        export_df_display = export_df[match_mask]
     else:
-        summary_df_display = summary_df
+        export_df_display = export_df
 
-    st.dataframe(summary_df_display, use_container_width=True, height=350)
-    st.download_button(
-        "⬇️ Download Summary Table (CSV)",
-        data=summary_df.to_csv(index=False).encode("utf-8"),
-        file_name="grid_summary.csv",
-        mime="text/csv",
-    )
+    st.dataframe(export_df_display, use_container_width=True, height=350)
 
-    st.divider()
-
-    # ------------------------------------------------------------- #
-    # Step 8 — Charts
-    # ------------------------------------------------------------- #
-    st.header("Step 8 — Charts")
-    chart_col1, chart_col2 = st.columns(2)
-
-    with chart_col1:
-        hist_fig = px.histogram(
-            summary_df, x="Point_Count", nbins=30, title="Histogram of Point_Count"
-        )
-        st.plotly_chart(hist_fig, use_container_width=True)
-
-    with chart_col2:
-        top20 = summary_df.nlargest(20, "Point_Count")
-        bar_fig = px.bar(
-            top20, x=grid_id_col, y="Point_Count", title="Top 20 Grids by Point Count"
-        )
-        st.plotly_chart(bar_fig, use_container_width=True)
-
-    pie_df = pd.DataFrame(
-        {
-            "Status": ["Visited", "Unvisited"],
-            "Count": [stats.visited_grids, stats.unvisited_grids],
-        }
-    )
-    pie_fig = px.pie(pie_df, names="Status", values="Count", title="Visited vs Unvisited Grids")
-    st.plotly_chart(pie_fig, use_container_width=True)
-
-    st.divider()
-
-    # ------------------------------------------------------------- #
-    # Step 9 — Export results
-    # ------------------------------------------------------------- #
-    st.header("Step 9 — Export Results")
+    st.subheader("Download Export Datasets")
     exp_col1, exp_col2, exp_col3 = st.columns(3)
     with exp_col1:
         st.download_button(
             "⬇️ Download Updated Grid (GeoPackage)",
-            data=to_geopackage_bytes(grid_with_counts, layer_name="grid_with_counts"),
-            file_name="grid_with_point_count.gpkg",
+            data=to_geopackage_bytes(grid_with_counts, layer_name="gts_grid_with_counts"),
+            file_name="gts_grid_with_point_count.gpkg",
             mime="application/geopackage+sqlite3",
         )
     with exp_col2:
         st.download_button(
             "⬇️ Download Updated Grid (GeoJSON)",
             data=to_geojson_bytes(grid_with_counts),
-            file_name="grid_with_point_count.geojson",
+            file_name="gts_grid_with_point_count.geojson",
             mime="application/geo+json",
         )
     with exp_col3:
         st.download_button(
             "⬇️ Download CSV Summary",
             data=to_csv_bytes(grid_with_counts),
-            file_name="grid_with_point_count.csv",
+            file_name="gts_grid_with_point_count.csv",
             mime="text/csv",
         )
 
 
 if __name__ == "__main__":
     main()
+
+
+

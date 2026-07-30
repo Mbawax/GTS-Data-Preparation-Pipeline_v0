@@ -32,7 +32,7 @@ from utils.preprocessing import (
 )
 from utils.spatial import clip_to_polygon, filter_by_bbox
 
-st.set_page_config(page_title="Module 1 — Data Preparation", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Module 1 — GTS Data Preparation", page_icon="📦", layout="wide")
 
 
 # --------------------------------------------------------------------------- #
@@ -55,8 +55,8 @@ def _load_boundary(file_bytes: bytes, file_name: str) -> gpd.GeoDataFrame:
 
 
 def main() -> None:
-    st.title("📦 Module 1 — Data Preparation")
-    st.caption("Clean and standardise raw GPS tracks before analysis. No analytics performed here.")
+    st.title("📦 Module 1 — GTS Data Preparation")
+    st.caption("Clean and standardise raw GTS tracks before analysis. No analytics performed here.")
 
     # ----------------------------------------------------------------- #
     # Step 1 — Boundary upload
@@ -97,11 +97,11 @@ def main() -> None:
     st.divider()
 
     # ----------------------------------------------------------------- #
-    # Step 2 — GPS Track CSV uploads
+    # Step 2 — GTS Track CSV uploads
     # ----------------------------------------------------------------- #
-    st.header("Step 2 — Upload GPS Track CSV Files")
+    st.header("Step 2 — Upload GTS Track CSV Files")
     csv_files = st.file_uploader(
-        "Upload one or many GPS-track CSV files",
+        "Upload one or many GTS-track CSV files",
         type=["csv"],
         accept_multiple_files=True,
         key="csv_upload",
@@ -253,6 +253,8 @@ def main() -> None:
             final_gdf = st.session_state["prepared_gdf"]
             records_summary = st.session_state.get("records_summary", {})
 
+            st.info("💡 **Dataset Ready**: This prepared GTS dataset is automatically preloaded for **Module 2 — GTS Analytics**.")
+
             st.subheader("Pipeline Summary")
             metric_cols = st.columns(len(records_summary) or 1)
             for col, (label, value) in zip(metric_cols, records_summary.items()):
@@ -266,22 +268,22 @@ def main() -> None:
                 with exp_col1:
                     st.download_button(
                         "⬇️ Download GeoPackage",
-                        data=to_geopackage_bytes(final_gdf, layer_name="prepared_gps"),
-                        file_name="prepared_gps_tracks.gpkg",
+                        data=to_geopackage_bytes(final_gdf, layer_name="prepared_gts"),
+                        file_name="gts_prepared_tracks.gpkg",
                         mime="application/geopackage+sqlite3",
                     )
                 with exp_col2:
                     st.download_button(
                         "⬇️ Download CSV",
                         data=to_csv_bytes(final_gdf),
-                        file_name="prepared_gps_tracks.csv",
+                        file_name="gts_prepared_tracks.csv",
                         mime="text/csv",
                     )
                 with exp_col3:
                     st.download_button(
                         "⬇️ Download GeoJSON",
                         data=to_geojson_bytes(final_gdf),
-                        file_name="prepared_gps_tracks.geojson",
+                        file_name="gts_prepared_tracks.geojson",
                         mime="application/geo+json",
                     )
 

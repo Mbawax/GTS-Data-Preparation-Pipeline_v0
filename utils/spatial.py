@@ -133,3 +133,28 @@ def count_points_per_grid(
     result = result.merge(counts, how="left", left_on=grid_id_col, right_index=True)
     result["Point_Count"] = result["Point_Count"].fillna(0).astype(int)
     return result
+
+
+def classify_visitation_status(grid: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Attach 'Visitation_Status' column to the grid GeoDataFrame.
+
+    Visitation Status logic:
+        * Point_Count > 0 -> "Visited"
+        * Point_Count == 0 -> "Not Visited"
+
+    Args:
+        grid: Grid GeoDataFrame containing a ``Point_Count`` integer column.
+
+    Returns:
+        A copy of ``grid`` with ``Visitation_Status`` column added.
+    """
+    import numpy as np
+
+    grid = grid.copy()
+    counts = grid["Point_Count"].astype(int)
+    grid["Visitation_Status"] = np.where(counts > 0, "Visited", "Not Visited")
+    if "Visited" in grid.columns:
+        grid = grid.drop(columns=["Visited"])
+    return grid
+
+

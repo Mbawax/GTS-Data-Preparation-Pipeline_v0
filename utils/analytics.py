@@ -19,7 +19,7 @@ class GridStats:
     total_grids: int
     visited_grids: int
     unvisited_grids: int
-    total_gps_points: int
+    total_gts_points: int
     avg_points_per_visited_grid: float
     max_points: int
     min_points: int
@@ -55,7 +55,7 @@ def compute_grid_statistics(grid: gpd.GeoDataFrame) -> GridStats:
         total_grids=total_grids,
         visited_grids=visited_grids,
         unvisited_grids=unvisited_grids,
-        total_gps_points=int(counts.sum()),
+        total_gts_points=int(counts.sum()),
         avg_points_per_visited_grid=float(visited_counts.mean()) if visited_grids else 0.0,
         max_points=int(counts.max()) if total_grids else 0,
         min_points=int(counts.min()) if total_grids else 0,
@@ -63,6 +63,8 @@ def compute_grid_statistics(grid: gpd.GeoDataFrame) -> GridStats:
         std_points=float(counts.std()) if total_grids > 1 else 0.0,
         pct_visited=float(100 * visited_grids / total_grids) if total_grids else 0.0,
     )
+
+
 
 
 def compute_grid_areas(grid: gpd.GeoDataFrame, area_unit: str = "sq_km") -> gpd.GeoDataFrame:

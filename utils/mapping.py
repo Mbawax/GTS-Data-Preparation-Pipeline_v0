@@ -53,7 +53,7 @@ def build_analytics_map(
     max_count = int(grid["Point_Count"].max()) if len(grid) else 1
     max_count = max(max_count, 1)
     colormap = cm.linear.YlOrRd_09.scale(0, max_count)
-    colormap.caption = "GPS Point Count per Grid"
+    colormap.caption = "GTS Point Count per Grid"
 
     def style_function(feature):
         count = feature["properties"].get("Point_Count", 0)
@@ -67,14 +67,17 @@ def build_analytics_map(
     highlight_function = lambda feature: {"weight": 2, "color": "#000000", "fillOpacity": 0.9}
 
     tooltip_fields = [grid_id_col, "Point_Count"]
-    tooltip_aliases = ["Grid ID:", "Point Count:"]
+    tooltip_aliases = ["Grid ID:", "GTS Point Count:"]
+    if "Visitation_Status" in grid.columns:
+        tooltip_fields.append("Visitation_Status")
+        tooltip_aliases.append("Visitation Status:")
     if "Area" in grid.columns:
         tooltip_fields.append("Area")
         tooltip_aliases.append("Area (sq km):")
 
     grid_layer = folium.GeoJson(
         grid.to_json(),
-        name="Campaign Grid (Point_Count)",
+        name="Campaign Grid (GTS Coverage)",
         style_function=style_function,
         highlight_function=highlight_function,
         tooltip=folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_aliases, sticky=True),
@@ -91,14 +94,15 @@ def build_analytics_map(
             style_function=lambda f: {"fillOpacity": 0, "color": "#1f77b4", "weight": 2},
         ).add_to(fmap)
 
-    # -- Optional GPS points (clustered for performance) --------------------
+    # -- Optional GTS points (clustered for performance) --------------------
     if points is not None and not points.empty:
         sample = points if len(points) <= max_points_to_render else points.sample(
             max_points_to_render, random_state=42
         )
         coords = list(zip(sample.geometry.y, sample.geometry.x))
-        cluster_layer = FastMarkerCluster(coords, name="GPS Points")
+        cluster_layer = FastMarkerCluster(coords, name="GTS Points")
         cluster_layer.add_to(fmap)
+
 
     MiniMap(toggle_display=True).add_to(fmap)
     folium.LayerControl(collapsed=False).add_to(fmap)
